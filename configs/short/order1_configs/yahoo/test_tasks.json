@@ -1,0 +1,30 @@
+{
+    "SC": [
+        {
+            "sampling strategy": "random",
+            "dataset name": "amazon"
+        }
+    ],
+    "TC": [     
+        {
+            "sampling strategy": "random",
+            "dataset name": "yahoo"
+        },
+        {
+            "sampling strategy": "random",
+            "dataset name": "dbpedia"
+        }
+    ],
+    "NLI": [
+    ],
+    "QQP": [  
+    ],
+    "WiC": [ 
+    ],
+    "MultiRC": [ 
+    ],
+    "COPA": [ 
+    ],
+    "BoolQA": [
+    ]
+}

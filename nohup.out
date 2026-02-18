@@ -1,0 +1,206 @@
+
+############################################################
+# Long Sequence Benchmark - Order 6
+# CL Method: ella
+# Run Number: 1
+# Seed: 73
+# Output Base: logs_and_outputs/ella/long/order_6/outputs1
+# Log File: logs_and_outputs/ella/long/order_6/logs/train_and_infer1.log
+# Tasks: yelp -> amazon -> MNLI -> CB -> COPA -> QQP -> RTE -> IMDB -> SST-2 -> dbpedia -> agnews -> yahoo -> MultiRC -> BoolQA -> WiC
+############################################################
+
+Skipping Task 1: yelp
+Skipping Task 2: amazon
+Skipping Task 3: MNLI
+Skipping Task 4: CB
+Skipping Task 5: COPA
+Skipping Task 6: QQP
+Skipping Task 7: RTE
+Skipping Task 8: IMDB
+Skipping Task 9: SST-2
+Skipping Task 10: dbpedia
+Skipping Task 11: agnews
+Skipping Task 12: yahoo
+
+============================================================
+Task 13: MultiRC
+============================================================
+Command: deepspeed --master_port 27738 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_6/outputs1/12-yahoo/adapter --task_config_dir configs/long/order6_configs/MultiRC --output_dir logs_and_outputs/ella/long/order_6/outputs1/13-MultiRC --run_name long_round13 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_6/logs/train_and_infer1.log
+
+✓ Task 13 (MultiRC) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 14: BoolQA
+============================================================
+Command: deepspeed --master_port 27738 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_6/outputs1/13-MultiRC/adapter --task_config_dir configs/long/order6_configs/BoolQA --output_dir logs_and_outputs/ella/long/order_6/outputs1/14-BoolQA --run_name long_round14 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_6/logs/train_and_infer1.log
+
+✓ Task 14 (BoolQA) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 15: WiC
+============================================================
+Command: deepspeed --master_port 27738 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_6/outputs1/14-BoolQA/adapter --task_config_dir configs/long/order6_configs/WiC --output_dir logs_and_outputs/ella/long/order_6/outputs1/15-WiC --run_name long_round15 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_6/logs/train_and_infer1.log
+
+✓ Task 15 (WiC) completed successfully
+
+============================================================
+All tasks completed successfully!
+Full log: logs_and_outputs/ella/long/order_6/logs/train_and_infer1.log
+============================================================
+
+
+############################################################
+# Long Sequence Benchmark - Order 4
+# CL Method: ella
+# Run Number: 1
+# Seed: 73
+# Output Base: logs_and_outputs/ella/long/order_4/outputs1
+# Log File: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+# Tasks: MNLI -> CB -> WiC -> COPA -> QQP -> BoolQA -> RTE -> IMDB -> yelp -> amazon -> SST-2 -> dbpedia -> agnews -> MultiRC -> yahoo
+############################################################
+
+
+============================================================
+Task 1: MNLI
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path initial_model/t5-large --task_config_dir configs/long/order4_configs/MNLI --output_dir logs_and_outputs/ella/long/order_4/outputs1/1-MNLI --run_name long_round1 --num_train_epochs 1 --lamda_1 0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 1 (MNLI) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 2: CB
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/1-MNLI/adapter --task_config_dir configs/long/order4_configs/CB --output_dir logs_and_outputs/ella/long/order_4/outputs1/2-CB --run_name long_round2 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 2 (CB) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 3: WiC
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/2-CB/adapter --task_config_dir configs/long/order4_configs/WiC --output_dir logs_and_outputs/ella/long/order_4/outputs1/3-WiC --run_name long_round3 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 3 (WiC) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 4: COPA
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/3-WiC/adapter --task_config_dir configs/long/order4_configs/COPA --output_dir logs_and_outputs/ella/long/order_4/outputs1/4-COPA --run_name long_round4 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 4 (COPA) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 5: QQP
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/4-COPA/adapter --task_config_dir configs/long/order4_configs/QQP --output_dir logs_and_outputs/ella/long/order_4/outputs1/5-QQP --run_name long_round5 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 5 (QQP) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 6: BoolQA
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/5-QQP/adapter --task_config_dir configs/long/order4_configs/BoolQA --output_dir logs_and_outputs/ella/long/order_4/outputs1/6-BoolQA --run_name long_round6 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 6 (BoolQA) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 7: RTE
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/6-BoolQA/adapter --task_config_dir configs/long/order4_configs/RTE --output_dir logs_and_outputs/ella/long/order_4/outputs1/7-RTE --run_name long_round7 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 7 (RTE) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 8: IMDB
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/7-RTE/adapter --task_config_dir configs/long/order4_configs/IMDB --output_dir logs_and_outputs/ella/long/order_4/outputs1/8-IMDB --run_name long_round8 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 8 (IMDB) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 9: yelp
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/8-IMDB/adapter --task_config_dir configs/long/order4_configs/yelp --output_dir logs_and_outputs/ella/long/order_4/outputs1/9-yelp --run_name long_round9 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 9 (yelp) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 10: amazon
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/9-yelp/adapter --task_config_dir configs/long/order4_configs/amazon --output_dir logs_and_outputs/ella/long/order_4/outputs1/10-amazon --run_name long_round10 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 10 (amazon) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 11: SST-2
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/10-amazon/adapter --task_config_dir configs/long/order4_configs/SST-2 --output_dir logs_and_outputs/ella/long/order_4/outputs1/11-SST-2 --run_name long_round11 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 11 (SST-2) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 12: dbpedia
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/11-SST-2/adapter --task_config_dir configs/long/order4_configs/dbpedia --output_dir logs_and_outputs/ella/long/order_4/outputs1/12-dbpedia --run_name long_round12 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 12 (dbpedia) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 13: agnews
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/12-dbpedia/adapter --task_config_dir configs/long/order4_configs/agnews --output_dir logs_and_outputs/ella/long/order_4/outputs1/13-agnews --run_name long_round13 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 13 (agnews) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 14: MultiRC
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/13-agnews/adapter --task_config_dir configs/long/order4_configs/MultiRC --output_dir logs_and_outputs/ella/long/order_4/outputs1/14-MultiRC --run_name long_round14 --num_train_epochs 1 --lamda_1 500000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 14 (MultiRC) completed successfully
+Sleeping for 5 seconds before next task...
+
+============================================================
+Task 15: yahoo
+============================================================
+Command: deepspeed --master_port 25373 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --data_dir CL_Benchmark --instruction_file configs/instruction_config.json --instruction_strategy single --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 4 --learning_rate 1e-03 --deepspeed configs/ds_configs/stage2.config --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --eval_strategy no --save_strategy no --save_steps 1500 --cl_method ella --seed 73 --model_name_or_path logs_and_outputs/ella/long/order_4/outputs1/14-MultiRC/adapter --task_config_dir configs/long/order4_configs/yahoo --output_dir logs_and_outputs/ella/long/order_4/outputs1/15-yahoo --run_name long_round15 --num_train_epochs 1 --lamda_1 50000000.0 --lamda_2 0
+Log file: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+
+✓ Task 15 (yahoo) completed successfully
+
+============================================================
+All tasks completed successfully!
+Full log: logs_and_outputs/ella/long/order_4/logs/train_and_infer1.log
+============================================================
+

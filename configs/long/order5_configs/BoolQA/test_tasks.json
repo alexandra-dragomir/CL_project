@@ -1,0 +1,20 @@
+{
+    "SC": [],
+    "TC": [],
+    "NLI": [],
+    "QQP": [],
+    "WiC": [],
+    "MultiRC": [
+        {
+            "sampling strategy": "random",
+            "dataset name": "MultiRC"
+        }
+    ],
+    "COPA": [],
+    "BoolQA": [
+        {
+            "sampling strategy": "random",
+            "dataset name": "BoolQA"
+        }
+    ]
+}

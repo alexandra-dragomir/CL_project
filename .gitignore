@@ -1,0 +1,16 @@
+.vscode/
+wandb/
+nohups/
+nohup_*
+
+initial_model/*
+initial_model/llama/*
+initial_model/t5/*
+
+# envs
+olora/
+olora_3.11/
+pyproject.toml
+
+logs_and_outputs/*
+logs_and_outputs_llama/*

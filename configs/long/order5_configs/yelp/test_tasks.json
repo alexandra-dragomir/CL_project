@@ -1,0 +1,70 @@
+{
+    "SC": [
+        {
+            "sampling strategy": "random",
+            "dataset name": "IMDB"
+        },
+        {
+            "sampling strategy": "random",
+            "dataset name": "SST-2"
+        },
+        {
+            "sampling strategy": "random",
+            "dataset name": "yelp"
+        }
+    ],
+    "TC": [
+        {
+            "sampling strategy": "random",
+            "dataset name": "dbpedia"
+        },
+        {
+            "sampling strategy": "random",
+            "dataset name": "agnews"
+        }
+    ],
+    "NLI": [
+        {
+            "sampling strategy": "random",
+            "dataset name": "MNLI"
+        },
+        {
+            "sampling strategy": "random",
+            "dataset name": "CB"
+        },
+        {
+            "sampling strategy": "random",
+            "dataset name": "RTE"
+        }
+    ],
+    "QQP": [
+        {
+            "sampling strategy": "random",
+            "dataset name": "QQP"
+        }
+    ],
+    "WiC": [
+        {
+            "sampling strategy": "random",
+            "dataset name": "WiC"
+        }
+    ],
+    "MultiRC": [
+        {
+            "sampling strategy": "random",
+            "dataset name": "MultiRC"
+        }
+    ],
+    "COPA": [
+        {
+            "sampling strategy": "random",
+            "dataset name": "COPA"
+        }
+    ],
+    "BoolQA": [
+        {
+            "sampling strategy": "random",
+            "dataset name": "BoolQA"
+        }
+    ]
+}
