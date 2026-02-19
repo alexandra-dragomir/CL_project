@@ -1,8 +1,11 @@
 #!/bin/bash
 set -x
 
-# Use Python 3.11 environment
-export PATH="/root/projects/O-LoRA/olora_3.11/bin:$PATH"
+# Use venv_olora (path relative to script so it works after moving the project)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+VENV_BIN="$PROJECT_ROOT/venv_olora/bin"
+[ -x "$VENV_BIN/deepspeed" ] && export PATH="$VENV_BIN:$PATH"
 
 export CUDA_DEVICE_ORDER="PCI_BUS_ID"
 export TRANSFORMERS_CACHE=/root/.cache/huggingface
@@ -11,7 +14,7 @@ port=$(shuf -i25000-30000 -n1)
  
 # bash scripts_llama/order_1.sh> logs_and_outputs_llama/order_1/logs/train_and_infer.log 2>&1 &
 
-# CUDA_VISIBLE_DEVICES=0 /root/projects/O-LoRA/olora_3.11/bin/deepspeed --master_port $port src/run_uie_lora.py \
+# CUDA_VISIBLE_DEVICES=0 deepspeed --master_port $port src/run_uie_lora.py \
 #    --do_predict \
 #    --predict_with_generate \
 #    --model_name_or_path logs_and_outputs_llama/order_1/outputs/1-dbpedia/adapter \
@@ -46,7 +49,7 @@ port=$(shuf -i25000-30000 -n1)
 
 # sleep 5
 
-# CUDA_VISIBLE_DEVICES=0 /root/projects/O-LoRA/olora_3.11/bin/deepspeed --master_port $port src/run_uie_lora.py \
+# CUDA_VISIBLE_DEVICES=0 deepspeed --master_port $port src/run_uie_lora.py \
 #    --do_train \
 #    --do_predict \
 #    --predict_with_generate \
@@ -82,7 +85,7 @@ port=$(shuf -i25000-30000 -n1)
 
 # sleep 5
 
-# CUDA_VISIBLE_DEVICES=0 /root/projects/O-LoRA/olora_3.11/bin/deepspeed --master_port $port src/run_uie_lora.py \
+# CUDA_VISIBLE_DEVICES=0 deepspeed --master_port $port src/run_uie_lora.py \
 #    --do_train \
 #    --do_predict \
 #    --predict_with_generate \
@@ -118,7 +121,7 @@ port=$(shuf -i25000-30000 -n1)
 
 # sleep 5
 
-# CUDA_VISIBLE_DEVICES=0 /root/projects/O-LoRA/olora_3.11/bin/deepspeed --master_port $port src/run_uie_lora.py \
+# CUDA_VISIBLE_DEVICES=0 deepspeed --master_port $port src/run_uie_lora.py \
 #    --do_train \
 #    --do_predict \
 #    --predict_with_generate \
@@ -153,7 +156,7 @@ port=$(shuf -i25000-30000 -n1)
 #    --lamda_2 0 
 
 
-CUDA_VISIBLE_DEVICES=0 /root/projects/O-LoRA/olora_3.11/bin/deepspeed --master_port $port src/run_uie_lora.py \
+CUDA_VISIBLE_DEVICES=0 deepspeed --master_port $port src/run_uie_lora.py \
    --do_predict \
    --predict_with_generate \
    --model_name_or_path logs_and_outputs_llama/order_1/outputs/4-agnews/adapter \

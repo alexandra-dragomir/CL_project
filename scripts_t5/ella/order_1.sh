@@ -1,6 +1,14 @@
 #!/bin/bash
 set -x
 
+# Ensure deepspeed is on PATH (venv may have been moved; activate has old path baked in)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+VENV_BIN="$PROJECT_ROOT/venv_olora/bin"
+if [ -x "$VENV_BIN/deepspeed" ]; then
+  export PATH="$VENV_BIN:$PATH"
+fi
+
 export CUDA_DEVICE_ORDER="PCI_BUS_ID"
 export TRANSFORMERS_CACHE=/root/.cache/huggingface
 export SEED=73
@@ -21,7 +29,7 @@ CUDA_VISIBLE_DEVICES=0 deepspeed --master_port $port src/run_uie_lora.py \
    --task_config_dir configs/short/order1_configs/dbpedia \
    --instruction_file configs/instruction_config.json \
    --instruction_strategy single \
-   --output_dir logs_and_outputs/ella/short_round1/order_1/outputs1/1-dbpedia \
+   --output_dir logs_and_outputs2/ella/short_round1/order_1/outputs1/1-dbpedia \
    --per_device_train_batch_size 8 \
    --per_device_eval_batch_size 128 \
    --gradient_accumulation_steps 4 \
@@ -50,117 +58,117 @@ CUDA_VISIBLE_DEVICES=0 deepspeed --master_port $port src/run_uie_lora.py \
 
 sleep 5
 
-CUDA_VISIBLE_DEVICES=0 deepspeed --master_port $port src/run_uie_lora.py \
-   --cl_method ella \
-   --do_train \
-   --do_predict \
-   --predict_with_generate \
-   --model_name_or_path logs_and_outputs/ella/short/order_1/outputs1/1-dbpedia/adapter \
-   --data_dir CL_Benchmark \
-   --task_config_dir configs/short/order1_configs/amazon \
-   --instruction_file configs/instruction_config.json \
-   --instruction_strategy single \
-   --output_dir logs_and_outputs/ella/short_round1/order_1/outputs1/2-amazon \
-   --per_device_train_batch_size 8 \
-   --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 4 \
-   --learning_rate 1e-03 \
-   --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
-   --run_name order1_round2 \
-   --max_source_length 512 \
-   --max_target_length 50 \
-   --generation_max_length 50 \
-   --add_task_name True \
-   --add_dataset_name True \
-   --overwrite_output_dir \
-   --overwrite_cache \
-   --lr_scheduler_type constant \
-   --warmup_steps 0 \
-   --logging_strategy steps \
-   --logging_steps 10 \
-   --eval_strategy no \
-   --save_strategy no \
-   --save_steps 1500 \
-   --lamda_1 3e4 \
-   --lamda_2 0 \
-   --seed $SEED \
-   --report_to wandb
+# CUDA_VISIBLE_DEVICES=0 deepspeed --master_port $port src/run_uie_lora.py \
+#    --cl_method ella \
+#    --do_train \
+#    --do_predict \
+#    --predict_with_generate \
+#    --model_name_or_path logs_and_outputs/ella/short/order_1/outputs1/1-dbpedia/adapter \
+#    --data_dir CL_Benchmark \
+#    --task_config_dir configs/short/order1_configs/amazon \
+#    --instruction_file configs/instruction_config.json \
+#    --instruction_strategy single \
+#    --output_dir logs_and_outputs/ella/short_round1/order_1/outputs1/2-amazon \
+#    --per_device_train_batch_size 8 \
+#    --per_device_eval_batch_size 128 \
+#    --gradient_accumulation_steps 4 \
+#    --learning_rate 1e-03 \
+#    --num_train_epochs 1 \
+#    --deepspeed configs/ds_configs/stage2.config \
+#    --run_name order1_round2 \
+#    --max_source_length 512 \
+#    --max_target_length 50 \
+#    --generation_max_length 50 \
+#    --add_task_name True \
+#    --add_dataset_name True \
+#    --overwrite_output_dir \
+#    --overwrite_cache \
+#    --lr_scheduler_type constant \
+#    --warmup_steps 0 \
+#    --logging_strategy steps \
+#    --logging_steps 10 \
+#    --eval_strategy no \
+#    --save_strategy no \
+#    --save_steps 1500 \
+#    --lamda_1 3e4 \
+#    --lamda_2 0 \
+#    --seed $SEED \
+#    --report_to wandb
 
-sleep 5
+# sleep 5
 
-CUDA_VISIBLE_DEVICES=0 deepspeed --master_port $port src/run_uie_lora.py \
-   --cl_method ella \
-   --do_train \
-   --do_predict \
-   --predict_with_generate \
-   --model_name_or_path logs_and_outputs/ella/short/order_1/outputs1/2-amazon/adapter \
-   --data_dir CL_Benchmark \
-   --task_config_dir configs/short/order1_configs/yahoo \
-   --instruction_file configs/instruction_config.json \
-   --instruction_strategy single \
-   --output_dir logs_and_outputs/ella/short_round1/order_1/outputs1/3-yahoo \
-   --per_device_train_batch_size 8 \
-   --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 4 \
-   --learning_rate 1e-03 \
-   --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
-   --run_name order1_round3 \
-   --max_source_length 512 \
-   --max_target_length 50 \
-   --generation_max_length 50 \
-   --add_task_name True \
-   --add_dataset_name True \
-   --overwrite_output_dir \
-   --overwrite_cache \
-   --lr_scheduler_type constant \
-   --warmup_steps 0 \
-   --logging_strategy steps \
-   --logging_steps 10 \
-   --eval_strategy no \
-   --save_strategy no \
-   --save_steps 1500 \
-   --lamda_1 3e4 \
-   --lamda_2 0 \
-   --seed $SEED \
-   --report_to wandb
+# CUDA_VISIBLE_DEVICES=0 deepspeed --master_port $port src/run_uie_lora.py \
+#    --cl_method ella \
+#    --do_train \
+#    --do_predict \
+#    --predict_with_generate \
+#    --model_name_or_path logs_and_outputs/ella/short/order_1/outputs1/2-amazon/adapter \
+#    --data_dir CL_Benchmark \
+#    --task_config_dir configs/short/order1_configs/yahoo \
+#    --instruction_file configs/instruction_config.json \
+#    --instruction_strategy single \
+#    --output_dir logs_and_outputs/ella/short_round1/order_1/outputs1/3-yahoo \
+#    --per_device_train_batch_size 8 \
+#    --per_device_eval_batch_size 128 \
+#    --gradient_accumulation_steps 4 \
+#    --learning_rate 1e-03 \
+#    --num_train_epochs 1 \
+#    --deepspeed configs/ds_configs/stage2.config \
+#    --run_name order1_round3 \
+#    --max_source_length 512 \
+#    --max_target_length 50 \
+#    --generation_max_length 50 \
+#    --add_task_name True \
+#    --add_dataset_name True \
+#    --overwrite_output_dir \
+#    --overwrite_cache \
+#    --lr_scheduler_type constant \
+#    --warmup_steps 0 \
+#    --logging_strategy steps \
+#    --logging_steps 10 \
+#    --eval_strategy no \
+#    --save_strategy no \
+#    --save_steps 1500 \
+#    --lamda_1 3e4 \
+#    --lamda_2 0 \
+#    --seed $SEED \
+#    --report_to wandb
 
-sleep 5
+# sleep 5
 
-CUDA_VISIBLE_DEVICES=0 deepspeed --master_port $port src/run_uie_lora.py \
-   --cl_method ella \
-   --do_train \
-   --do_predict \
-   --predict_with_generate \
-   --model_name_or_path logs_and_outputs/ella/short/order_1/outputs1/3-yahoo/adapter \
-   --data_dir CL_Benchmark \
-   --task_config_dir configs/order1_configs/agnews \
-   --instruction_file configs/instruction_config.json \
-   --instruction_strategy single \
-   --output_dir logs_and_outputs/ella/short/order_1/outputs1/4-agnews \
-   --per_device_train_batch_size 8 \
-   --per_device_eval_batch_size 128 \
-   --gradient_accumulation_steps 4 \
-   --learning_rate 1e-03 \
-   --num_train_epochs 1 \
-   --deepspeed configs/ds_configs/stage2.config \
-   --run_name order1_round4 \
-   --max_source_length 512 \
-   --max_target_length 50 \
-   --generation_max_length 50 \
-   --add_task_name True \
-   --add_dataset_name True \
-   --overwrite_output_dir \
-   --overwrite_cache \
-   --lr_scheduler_type constant \
-   --warmup_steps 0 \
-   --logging_strategy steps \
-   --logging_steps 10 \
-   --eval_strategy no \
-   --save_strategy no \
-   --save_steps 1500 \
-   --lamda_1 3e4 \
-   --lamda_2 0 \
-   --seed $SEED \
-   --report_to wandb
+# CUDA_VISIBLE_DEVICES=0 deepspeed --master_port $port src/run_uie_lora.py \
+#    --cl_method ella \
+#    --do_train \
+#    --do_predict \
+#    --predict_with_generate \
+#    --model_name_or_path logs_and_outputs/ella/short/order_1/outputs1/3-yahoo/adapter \
+#    --data_dir CL_Benchmark \
+#    --task_config_dir configs/order1_configs/agnews \
+#    --instruction_file configs/instruction_config.json \
+#    --instruction_strategy single \
+#    --output_dir logs_and_outputs/ella/short/order_1/outputs1/4-agnews \
+#    --per_device_train_batch_size 8 \
+#    --per_device_eval_batch_size 128 \
+#    --gradient_accumulation_steps 4 \
+#    --learning_rate 1e-03 \
+#    --num_train_epochs 1 \
+#    --deepspeed configs/ds_configs/stage2.config \
+#    --run_name order1_round4 \
+#    --max_source_length 512 \
+#    --max_target_length 50 \
+#    --generation_max_length 50 \
+#    --add_task_name True \
+#    --add_dataset_name True \
+#    --overwrite_output_dir \
+#    --overwrite_cache \
+#    --lr_scheduler_type constant \
+#    --warmup_steps 0 \
+#    --logging_strategy steps \
+#    --logging_steps 10 \
+#    --eval_strategy no \
+#    --save_strategy no \
+#    --save_steps 1500 \
+#    --lamda_1 3e4 \
+#    --lamda_2 0 \
+#    --seed $SEED \
+#    --report_to wandb

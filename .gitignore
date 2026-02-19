@@ -10,6 +10,7 @@ initial_model/t5/*
 # envs
 olora/
 olora_3.11/
+venv_olora/
 pyproject.toml
 
 logs_and_outputs/*
