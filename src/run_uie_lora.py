@@ -52,6 +52,7 @@ from uie_dataset_lora import gen_cache_path
 
 from uie_trainer_lora import UIETrainer as UIETrainerOLoRA, DenserEvalCallback, skip_instructions
 from uie_trainer_lora_ella import UIETrainerELLA
+from uie_trainer_lora_ella_incremental import UIETrainerELLAIncremental
 from compute_metrics import compute_metrics, compute_grouped_metrics
 from model.llama import LlamaForCausalLM_with_lossmask
 
@@ -238,8 +239,14 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
         metadata={"help": "If specifid, the model will do more evaluation at the beginning of training."}
     )
     do_demo: bool = field(default=False, metadata={"help": "Whether to run the model as a demo in the terminal."})
-    lamda_1: float = field(default = 0.5)
-    lamda_2: float = field(default = 0)
+    lamda_1: float = field(default=0.5, metadata={"help": "ELLA regularization weight (used when lamda_1_list is not set)."})
+    lamda_2: float = field(default=0)
+    lamda_1_list: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Comma-separated list of 3 lambda_1 values for incremental ELLA: early,middle,late transformer blocks (e.g. '0.1,1.0,10.0'). If set, overrides lamda_1."
+        },
+    )
     cl_method: str = field(
         default="olora",
         metadata={
@@ -524,10 +531,14 @@ def main():
     if training_args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
-    # Select trainer based on cl_method argument
-    if training_args.cl_method == 'ella':
-        logger.info("Using ELLA trainer (alignment penalty)")
-        TrainerClass = UIETrainerELLA
+    # Select trainer based on cl_method and lamda_1_list
+    if training_args.cl_method == "ella":
+        if getattr(training_args, "lamda_1_list", None):
+            logger.info("Using ELLA trainer with incremental lambda (lamda_1_list)")
+            TrainerClass = UIETrainerELLAIncremental
+        else:
+            logger.info("Using ELLA trainer (alignment penalty)")
+            TrainerClass = UIETrainerELLA
     else:
         logger.info("Using O-LoRA trainer (orthogonality constraint)")
         TrainerClass = UIETrainerOLoRA

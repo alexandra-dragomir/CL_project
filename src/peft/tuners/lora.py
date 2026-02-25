@@ -205,6 +205,7 @@ class LoraModel(torch.nn.Module):
                         lora_config.lora_alpha,
                         lora_config.lora_dropout,
                         lora_config.init_lora_weights,
+                        getattr(lora_config, "r_sum", 0), # MODIFIED HERE
                     )
                 else:
                     if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
