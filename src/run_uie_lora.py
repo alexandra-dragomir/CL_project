@@ -50,8 +50,9 @@ from peft import get_peft_config, get_peft_model, LoraConfig, TaskType, PeftMode
 from uie_collator import DataCollatorForUIE
 from uie_dataset_lora import gen_cache_path
 
-from uie_trainer_lora import UIETrainer as UIETrainerOLoRA, DenserEvalCallback, skip_instructions
+from uie_trainer_lora import UIETrainer as UIETrainerOLoRA, DenserEvalCallback, WandbFilterCallback, WANDB_PREDICT_ALLOWED_KEYS, skip_instructions
 from uie_trainer_lora_ella import UIETrainerELLA
+from uie_trainer_lora_ella_drop_values import UIETrainerELLADrop
 from uie_trainer_lora_ella_incremental import UIETrainerELLAIncremental
 from compute_metrics import compute_metrics, compute_grouped_metrics
 from model.llama import LlamaForCausalLM_with_lossmask
@@ -244,7 +245,7 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     lamda_1_list: Optional[str] = field(
         default=None,
         metadata={
-            "help": "Comma-separated list of 3 lambda_1 values for incremental ELLA: early,middle,late transformer blocks (e.g. '0.1,1.0,10.0'). If set, overrides lamda_1."
+            "help": "Comma-separated partition lambda_1 for incremental ELLA: 2 = first/last half, 3 = first/mid/last third (e.g. '0.1,10.0' or '0.1,1.0,10.0'). If set, uses these instead of scalar lamda_1; if not set, uses lamda_1 (per-task default from run script) for all blocks."
         },
     )
     cl_method: str = field(
@@ -253,10 +254,28 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
             "help": "Continual learning method: 'olora' (O-LoRA orthogonality) or 'ella' (ELLA alignment penalty)"
         }
     )
+    ella_variant: str = field(
+        default="ella",
+        metadata={
+            "help": "ELLA loss variant: 'ella' (use W_past = lora_B @ lora_A) or 'ella_with_base_w' (use base model weights W)."
+        }
+    )
     log_cl_metrics: bool = field(
         default=True,
         metadata={
             "help": "If True, log CL-specific metrics (ella_loss/orthogonal_loss, l2_loss) to console and wandb. Set False to hide them."
+        }
+    )
+    ella_drop: bool = field(
+        default=False,
+        metadata={
+            "help": "If True, use ELLA trainer with drop_lowest (drops lowest fraction of elements in ELLA loss). Requires cl_method=ella."
+        }
+    )
+    drop_lowest: float = field(
+        default=0.1,
+        metadata={
+            "help": "Fraction of elements to drop (set to 0) when computing ELLA loss: drop the smallest drop_lowest fraction per module (e.g. 0.1 = keep top 90%). Used when ella_drop=True."
         }
     )
 
@@ -310,7 +329,7 @@ def main():
             )
 
     # Set seed before initializing model.
-    set_seed(training_args.seed)
+    set_seed(training_args.seed) #TODO: uncomment this when we want to use seed for training as well
     data_cache_dir = gen_cache_path(training_args.output_dir, data_args)
 
     # Get the UIE dataset
@@ -329,7 +348,7 @@ def main():
         max_num_instances_per_task=data_args.max_num_instances_per_task,
         max_num_instances_per_eval_task=data_args.max_num_instances_per_eval_task,
         num_examples=data_args.num_examples,
-        seed=training_args.seed,  # Pass seed for reproducible dataset sampling
+        seed=training_args.seed,  # Pass seed for same split across runs
         download_mode="force_redownload" if data_args.overwrite_cache else None,
     )
     raw_datasets.cleanup_cache_files()
@@ -531,11 +550,14 @@ def main():
     if training_args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
-    # Select trainer based on cl_method and lamda_1_list
+    # Select trainer based on cl_method, lamda_1_list, and ella_drop
     if training_args.cl_method == "ella":
         if getattr(training_args, "lamda_1_list", None):
             logger.info("Using ELLA trainer with incremental lambda (lamda_1_list)")
             TrainerClass = UIETrainerELLAIncremental
+        elif getattr(training_args, "ella_drop", False):
+            logger.info("Using ELLA trainer with drop (drop_lowest=%s)", getattr(training_args, "drop_lowest", 0.1))
+            TrainerClass = UIETrainerELLADrop
         else:
             logger.info("Using ELLA trainer (alignment penalty)")
             TrainerClass = UIETrainerELLA
@@ -543,6 +565,15 @@ def main():
         logger.info("Using O-LoRA trainer (orthogonality constraint)")
         TrainerClass = UIETrainerOLoRA
     
+    report_to = getattr(training_args, "report_to", None)
+    use_wandb = report_to == "wandb" or (isinstance(report_to, (list, tuple)) and "wandb" in report_to)
+    # Filter wandb to CL metrics only (no rouge/exact_match) for all ELLA variants; O-LoRA keeps full logs.
+    use_wandb_filter = use_wandb and (training_args.cl_method != "olora")
+    callbacks = []
+    if use_wandb_filter:
+        callbacks.append(WandbFilterCallback())
+    if training_args.denser_evaluation:
+        callbacks.append(DenserEvalCallback)
     trainer = TrainerClass(
         model=model,
         args=training_args,
@@ -551,7 +582,7 @@ def main():
         tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_rouge_metrics,
-        callbacks=[DenserEvalCallback] if training_args.denser_evaluation else None
+        callbacks=callbacks if callbacks else None
     )
 
     all_metrics = {"run_name": training_args.run_name}
@@ -615,8 +646,10 @@ def main():
         )
         metrics["predict_samples"] = min(max_predict_samples, len(predict_dataset))
 
-        trainer.log(metrics)
-        trainer.log_metrics("predict", metrics)
+        # For wandb: only send allowed predict keys (ELLA variants); O-LoRA gets full. For log file: always print full.
+        predict_metrics_to_log = {k: v for k, v in metrics.items() if k in WANDB_PREDICT_ALLOWED_KEYS} if use_wandb_filter else metrics
+        trainer.log(dict(predict_metrics_to_log))  # callbacks/wandb see only this
+        trainer.log_metrics("predict", metrics)    # train_and_infer log file gets full metrics (rouge, exact_match, etc.)
         trainer.save_metrics("predict", metrics)
         all_metrics.update(metrics)
 

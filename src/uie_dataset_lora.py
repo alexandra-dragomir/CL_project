@@ -262,6 +262,7 @@ class UIEInstructions(datasets.GeneratorBasedBuilder):
             random.seed(self.config.seed)
             random.shuffle(instances)
             instances = instances[:max_num_instances]
+        
         if max_num_instances!=None and self.config.over_sampling and len(instances) < max_num_instances:
             random.seed(self.config.seed)  # Seed for reproducible oversampling
             origin_instances = instances.copy()

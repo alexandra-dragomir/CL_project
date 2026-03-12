@@ -111,10 +111,10 @@ def main():
     parser.add_argument(
         "--base_dir",
         type=str,
-        default="logs_and_outputs/ella/long_1000train/order_6/outputs2",
+        default="logs_and_outputs/ella/long_ella_drop_w_past_0.9/order_4/outputs1",
         help="Directory containing 1-taskname, 2-taskname, ... adapter folders",
     )
-    parser.add_argument("--out", type=str, default="adapter_norm_per_block", help="Output plot path prefix (will create <out>_encoder.png and <out>_decoder.png)")
+    parser.add_argument("--out", type=str, default="tests/adapter_norm_per_layer/ella_drop_w_past_0.9/o4_s1", help="Output plot path prefix (will create <out>_encoder.png and <out>_decoder.png)")
     parser.add_argument("--tasks", type=int, nargs="+", default=None, help="Restrict to these task numbers (default: all)")
     args = parser.parse_args()
 
@@ -157,6 +157,7 @@ def main():
     out_prefix = args.out.rstrip(".png")
     if out_prefix == args.out and not out_prefix.endswith("_"):
         out_prefix = args.out
+    Path(out_prefix).parent.mkdir(parents=True, exist_ok=True)
 
     def do_plot(block_order: List[Tuple[str, int]], data: List, title: str, out_path: str) -> None:
         block_labels = [f"{b[1]}" for b in block_order]

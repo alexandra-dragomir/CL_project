@@ -2,6 +2,7 @@
 wandb/
 nohups/
 nohup_*
+nohup*
 
 initial_model/*
 initial_model/llama/*
@@ -14,3 +15,5 @@ pyproject.toml
 
 logs_and_outputs/*
 logs_and_outputs_llama/*
+
+__pycache__/

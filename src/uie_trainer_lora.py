@@ -35,6 +35,103 @@ def skip_instructions(model, predictions_ids, tokenizer, ignore_idx=-100):
     return final_predictions
 
 
+# Keys allowed to be logged to wandb when WandbFilterCallback is used (step, loss, task loss, orthogonal, l2, grad norms).
+WANDB_ALLOWED_KEYS = frozenset({
+    "loss", "learning_rate", "epoch", "global_step",
+    "task_loss", "orthogonal_loss", "l2_loss",
+    "ella_loss", "ella_loss_no_drop", "ella_loss_after_drop", "ella_loss_no_drop_full", "ella_loss_after_drop_full",
+    "ella_loss_full", "grad_norm_ce", "grad_norm_ella",
+    "train_loss", "train_task_loss", "train_orthogonal_loss", "train_ella_loss", "train_l2_loss",
+    "train_grad_norm_ce", "train_grad_norm_ella",
+    "train_runtime", "train_samples_per_second", "train_steps_per_second",
+})
+
+# Predict metrics to send to wandb (empty = don't log rouge/exact_match etc. to wandb; add keys if you want some).
+WANDB_PREDICT_ALLOWED_KEYS = frozenset({"predict_samples"})
+
+
+def _to_scalar(v):
+    """Convert to Python float/int for wandb; accept numpy/tensor scalars."""
+    if isinstance(v, (int, float)):
+        return v
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _log_grad_norms_to_wandb(trainer, logs: dict) -> None:
+    """Log only grad_norm_ce and grad_norm_ella to wandb immediately. Call when they were just added to logs."""
+    report_to = getattr(trainer.args, "report_to", None)
+    if not report_to or ("wandb" not in (report_to if isinstance(report_to, (list, tuple)) else [report_to])):
+        return
+    if not trainer.is_world_process_zero():
+        return
+    to_log = {}
+    for key in ("grad_norm_ce", "grad_norm_ella"):
+        if key in logs:
+            v = _to_scalar(logs[key])
+            if v is not None:
+                to_log[f"train/{key}"] = v
+    if not to_log:
+        return
+    try:
+        import wandb
+        import os
+        if wandb.run is None:
+            # Ensure a run exists (e.g. when logging before WandbCallback has inited)
+            wandb.init(
+                project=os.getenv("WANDB_PROJECT", "CL"),
+                name=getattr(trainer.args, "run_name", None),
+            )
+        step = trainer.state.global_step
+        wandb.log(to_log, step=step)
+    except Exception:
+        pass
+
+
+def log_cl_metrics_to_wandb(trainer, logs: dict) -> None:
+    """Explicitly log CL metrics (ella_loss, l2_loss, grad_norm_ce, grad_norm_ella) to wandb.
+    Call this from ELLA trainers' log() after adding metrics to logs, so they appear even if
+    callback order or filtering would otherwise drop them."""
+    report_to = getattr(trainer.args, "report_to", None)
+    if not report_to or ("wandb" not in (report_to if isinstance(report_to, (list, tuple)) else [report_to])):
+        return
+    try:
+        import wandb
+        if wandb.run is None:
+            return
+    except Exception:
+        return
+    if not trainer.is_world_process_zero():
+        return
+    step = trainer.state.global_step
+    to_log = {}
+    for k, v in logs.items():
+        if k not in WANDB_ALLOWED_KEYS:
+            continue
+        scalar = _to_scalar(v)
+        if scalar is not None:
+            to_log[f"train/{k}"] = scalar
+    if to_log:
+        to_log["train/global_step"] = step
+        wandb.log(to_log, step=step)
+
+
+class WandbFilterCallback(TrainerCallback):
+    """Keep only step/loss/ella_loss/l2_loss in logs so wandb does not get rouge, accuracy, or per-subtask metrics."""
+
+    def __init__(self, allowed_keys=None):
+        self.allowed_keys = allowed_keys or WANDB_ALLOWED_KEYS
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if logs is None:
+            return
+        filtered = {k: v for k, v in logs.items() if k in self.allowed_keys}
+        logs.clear()
+        logs.update(filtered)
+
+
 class DenserEvalCallback(TrainerCallback):
 
     def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
@@ -113,11 +210,13 @@ class UIETrainer(Seq2SeqTrainer):
         lamda_2 = self.args.lamda_2
 
         # Scalars for logging (same dict goes to console and wandb when report_to includes "wandb")
+        task_loss_val = loss.item()
         orth_val = orthogonal_loss.item()
         l2_val = l2_loss.item()
         if not hasattr(self, "_orth_l2_sum"):
-            self._orth_l2_sum = {"orthogonal_loss": 0.0, "l2_loss": 0.0}
+            self._orth_l2_sum = {"task_loss": 0.0, "orthogonal_loss": 0.0, "l2_loss": 0.0}
             self._orth_l2_n = 0
+        self._orth_l2_sum["task_loss"] += task_loss_val
         self._orth_l2_sum["orthogonal_loss"] += orth_val
         self._orth_l2_sum["l2_loss"] += l2_val
         self._orth_l2_n += 1
@@ -132,12 +231,13 @@ class UIETrainer(Seq2SeqTrainer):
         return loss_detached
 
     def log(self, logs: dict, start_time: Optional[float] = None) -> None:
-        """Inject orthogonal_loss and l2_loss (avg over last logging interval) so they appear in console and wandb."""
+        """Inject task_loss, orthogonal_loss and l2_loss (avg over last logging interval) so they appear in console and wandb."""
         if getattr(self, "args", None) and getattr(self.args, "log_cl_metrics", True) and getattr(self, "_orth_l2_n", 0) > 0:
             n = self._orth_l2_n
+            logs["task_loss"] = round(self._orth_l2_sum["task_loss"] / n, 6)
             logs["orthogonal_loss"] = round(self._orth_l2_sum["orthogonal_loss"] / n, 6)
             logs["l2_loss"] = round(self._orth_l2_sum["l2_loss"] / n, 6)
-            self._orth_l2_sum = {"orthogonal_loss": 0.0, "l2_loss": 0.0}
+            self._orth_l2_sum = {"task_loss": 0.0, "orthogonal_loss": 0.0, "l2_loss": 0.0}
             self._orth_l2_n = 0
         super().log(logs, start_time)
 

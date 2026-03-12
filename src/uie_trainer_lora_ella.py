@@ -11,6 +11,7 @@ from transformers.integrations.deepspeed import deepspeed_init
 
 from uie_collator import SUPPORTED_DECODER_MODELS, check_model
 from uie_dataset_lora import ANSWER_PREFIX
+from uie_trainer_lora import log_cl_metrics_to_wandb, _log_grad_norms_to_wandb
 
 
 def skip_instructions(model, predictions_ids, tokenizer, ignore_idx=-100):
@@ -103,15 +104,21 @@ class UIETrainerELLA(Seq2SeqTrainer):
             # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
             loss = loss / self.args.gradient_accumulation_steps
 
+        # CE loss only (cross-entropy / prediction loss) for gradient norm logging
+        loss_ce = loss
+
         ########################### ELLA Regularization ##########################
         # ELLA: Efficient Lifelong Learning for Adapters (arXiv:2601.02232)
-        # Uses alignment penalty: L_ELLA = ||ΔW_t ⊙ W_past||_F²
+        # Uses alignment penalty: L_ELLA = ||ΔW_t ⊙ W_ref||_F²
         # Where:
         #   - ΔW_t = loranew_B @ loranew_A (current task update)
-        #   - W_past = lora_B @ lora_A (accumulated past updates)
+        #   - W_ref = W_past (lora_B @ lora_A) for "ella", or base model W for "ella_with_base_w"
         #   - ⊙ = element-wise (Hadamard) product
         # This penalizes overlap in high-energy directions while allowing
         # reuse of low-energy directions for forward transfer.
+        
+        ella_variant = getattr(self.args, "ella_variant", "ella")
+        use_base_w = ella_variant == "ella_with_base_w"
         
         ella_loss = 0.
         
@@ -128,31 +135,39 @@ class UIETrainerELLA(Seq2SeqTrainer):
                 if prefix not in module_params:
                     module_params[prefix] = {}
                 module_params[prefix]["loranew_B"] = param
-            elif "lora_A" in name:
+            elif "lora_A" in name and "loranew" not in name:
                 prefix = name.split("lora_A")[0]
                 if prefix not in module_params:
                     module_params[prefix] = {}
                 module_params[prefix]["lora_A"] = param
-            elif "lora_B" in name:
+            elif "lora_B" in name and "loranew" not in name:
                 prefix = name.split("lora_B")[0]
                 if prefix not in module_params:
                     module_params[prefix] = {}
                 module_params[prefix]["lora_B"] = param
         
         # Compute ELLA loss for each LoRA module
+        _model = getattr(self.model, "module", self.model)
         for prefix, params in module_params.items():
             if all(k in params for k in ["lora_A", "lora_B", "loranew_A", "loranew_B"]):
-                # W_past = lora_B @ lora_A  [out_features × in_features]
-                # This represents the accumulated effect of all previous task LoRA updates
-                W_past = torch.mm(params["lora_B"], params["lora_A"])
-                
                 # ΔW_t = loranew_B @ loranew_A  [out_features × in_features]
                 # This represents the current task's LoRA update
                 Delta_W_t = torch.mm(params["loranew_B"], params["loranew_A"])
                 
-                # ELLA loss: ||ΔW_t ⊙ W_past||_F² (Frobenius norm squared of Hadamard product)
-                # This penalizes alignment with high-magnitude past directions
-                ella_loss += (Delta_W_t * W_past).pow(2).sum()
+                if use_base_w:
+                    # ella_with_base_w: use base model weights W instead of W_past
+                    try:
+                        module = _model.get_submodule(prefix.rstrip("."))
+                        W = module.weight.T if getattr(module, "fan_in_fan_out", False) else module.weight
+                    except (AttributeError, ModuleNotFoundError):
+                        continue
+                    W_ref = W.to(Delta_W_t.dtype)
+                else:
+                    # Original ELLA: W_past = lora_B @ lora_A (accumulated past updates)
+                    W_ref = torch.mm(params["lora_B"], params["lora_A"])
+                
+                # ELLA loss: ||ΔW_t ⊙ W_ref||_F² (Frobenius norm squared of Hadamard product)
+                ella_loss += (Delta_W_t * W_ref).pow(2).sum()
 
         # L2 regularization for loranew_A/B (optional, default lamda_2=0)
         l2_loss = 0.
@@ -173,24 +188,64 @@ class UIETrainerELLA(Seq2SeqTrainer):
         self._ella_l2_sum["l2_loss"] += l2_loss_val
         self._ella_l2_n += 1
 
-        loss = loss + ella_loss * lamda_1 + l2_loss * lamda_2
+        # Gradient norms for CE and ELLA separately (backward each part, compute norm, then full backward for update)
+        # Use self.model so we see the same parameters DeepSpeed/accelerator use (model arg may be a copy in some setups)
+        def _grad_norm_sq():
+            total = 0.0
+            for p in self.model.parameters():
+                if p.grad is not None:
+                    total += p.grad.data.norm(2).item() ** 2
+            return total
+
+        loss_ella_part = ella_loss * lamda_1 + l2_loss * lamda_2
+        full_loss = loss_ce + loss_ella_part
+
+        self.accelerator.backward(loss_ce, retain_graph=True)
+        ce_grad_norm = _grad_norm_sq() ** 0.5
+        if not hasattr(self, "_ce_grad_norm_sum"):
+            self._ce_grad_norm_sum = 0.0
+        self._ce_grad_norm_sum += ce_grad_norm
+        if self.optimizer is not None:
+            self.optimizer.zero_grad(set_to_none=True)
+
+        self.accelerator.backward(loss_ella_part, retain_graph=True)
+        ella_grad_norm = _grad_norm_sq() ** 0.5
+        if not hasattr(self, "_ella_grad_norm_sum"):
+            self._ella_grad_norm_sum = 0.0
+        self._ella_grad_norm_sum += ella_grad_norm
+        if self.optimizer is not None:
+            self.optimizer.zero_grad(set_to_none=True)
+
         ######################################################################
 
         # Store loss before backward since accelerator.backward() returns None
-        loss_detached = loss.detach()
-        self.accelerator.backward(loss)
+        loss_detached = full_loss.detach()
+        self.accelerator.backward(full_loss)
 
         return loss_detached
 
     def log(self, logs: dict, start_time: Optional[float] = None) -> None:
-        """Inject ella_loss and l2_loss (avg over last logging interval) so they appear in console and wandb."""
+        """Inject ella_loss, l2_loss, grad_norm_ce, and grad_norm_ella (avg over last logging interval) for console and wandb."""
         if getattr(self, "args", None) and getattr(self.args, "log_cl_metrics", True) and getattr(self, "_ella_l2_n", 0) > 0:
             n = self._ella_l2_n
-            logs["ella_loss"] = round(self._ella_l2_sum["ella_loss"] / n, 6)
-            logs["l2_loss"] = round(self._ella_l2_sum["l2_loss"] / n, 6)
+            ella_val = float(self._ella_l2_sum["ella_loss"] / n)
+            l2_val = float(self._ella_l2_sum["l2_loss"] / n)
+            logs["ella_loss"] = ella_val
+            logs["l2_loss"] = l2_val
+            # Full-precision string for small values (e.g. 1e-10) so they're not truncated as 0.0
+            logs["ella_loss_full"] = f"{ella_val:.15e}"
             self._ella_l2_sum = {"ella_loss": 0.0, "l2_loss": 0.0}
             self._ella_l2_n = 0
+            # Always add grad norm keys (use 0.0 if sums are 0) so they appear in logs and wandb
+            ce_sum = getattr(self, "_ce_grad_norm_sum", 0.0)
+            ella_sum = getattr(self, "_ella_grad_norm_sum", 0.0)
+            logs["grad_norm_ce"] = float(ce_sum / n)
+            logs["grad_norm_ella"] = float(ella_sum / n)
+            self._ce_grad_norm_sum = 0.0
+            self._ella_grad_norm_sum = 0.0
+            _log_grad_norms_to_wandb(self, logs)
         super().log(logs, start_time)
+        log_cl_metrics_to_wandb(self, logs)
 
     def evaluation_loop(
         self,

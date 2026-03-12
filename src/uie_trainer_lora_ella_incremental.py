@@ -1,7 +1,12 @@
 """
-ELLA with incremental (layer-wise) lambda: different lambda_1 for first/middle/last third of transformer blocks.
+ELLA with incremental (layer-wise) lambda: different lambda_1 for partitions of transformer blocks.
 
-Use when --lamda_1_list "early,mid,late" is set (e.g. "0.1,1.0,10.0").
+- lamda_1_list NOT set: use the default per-task scalar args.lamda_1 for all blocks (same as
+  non-incremental ELLA). The run script passes one lamda_1 per task (e.g. 0 for task 1, 5e6 for task 2).
+- lamda_1_list set: comma-separated partition weights, e.g. "0.1,10.0" (2 partitions) or
+  "0.1,1.0,10.0" (3). Number of partitions = length of this list (first/last half or
+  first/middle/last third). These are absolute values; the run script can pass a different
+  lamda_1_list per task to get a "list of lists" (per-task partition lambdas).
 Only lambda_1 is varied; lambda_2 remains a single value.
 """
 
@@ -28,12 +33,15 @@ def _prefix_to_block_index(prefix: str) -> Optional[Tuple[str, int]]:
 
 class UIETrainerELLAIncremental(UIETrainerELLA):
     """
-    ELLA with incremental lambda: split transformer blocks into 3 segments (first/middle/last third)
-    and apply lamda_1_1, lamda_1_2, lamda_1_3 respectively. Requires args.lamda_1_list = "v1,v2,v3".
+    ELLA with incremental lambda: split transformer blocks into N partitions and apply
+    lamda_1_list[i] to partition i. N = len(lamda_1_list): 2 = first/last half, 3 = first/mid/last third.
+    If lamda_1_list is not set, falls back to scalar args.lamda_1 (per-task default from run script).
     """
 
-    def _get_prefix_block_segment_map(self, prefixes: List[str]) -> Tuple[Optional[Dict[str, int]], int]:
-        """Return (prefix -> segment 0/1/2, total_blocks). Segment 0=first third, 1=middle, 2=last."""
+    def _get_prefix_block_segment_map(
+        self, prefixes: List[str], num_segments: int
+    ) -> Tuple[Optional[Dict[str, int]], int]:
+        """Return (prefix -> segment 0..num_segments-1, total_blocks)."""
         block_indices = {}
         max_enc, max_dec = -1, -1
         for p in prefixes:
@@ -46,7 +54,7 @@ class UIETrainerELLAIncremental(UIETrainerELLA):
                 max_enc = max(max_enc, idx)
             else:
                 max_dec = max(max_dec, idx)
-        if not block_indices:
+        if not block_indices or num_segments < 1:
             return None, 0
         num_enc = max_enc + 1
         num_dec = max_dec + 1
@@ -54,7 +62,7 @@ class UIETrainerELLAIncremental(UIETrainerELLA):
         prefix_to_segment = {}
         for p, (enc_dec, idx) in block_indices.items():
             global_idx = idx if enc_dec == "encoder" else num_enc + idx
-            segment = min(2, global_idx * 3 // total_blocks) if total_blocks else 0
+            segment = min(num_segments - 1, global_idx * num_segments // total_blocks) if total_blocks else 0
             prefix_to_segment[p] = segment
         return prefix_to_segment, total_blocks
 
@@ -89,26 +97,33 @@ class UIETrainerELLAIncremental(UIETrainerELLA):
                 if prefix not in module_params:
                     module_params[prefix] = {}
                 module_params[prefix]["loranew_B"] = param
-            elif "lora_A" in name:
+            elif "lora_A" in name and "loranew" not in name:
                 prefix = name.split("lora_A")[0]
                 if prefix not in module_params:
                     module_params[prefix] = {}
                 module_params[prefix]["lora_A"] = param
-            elif "lora_B" in name:
+            elif "lora_B" in name and "loranew" not in name:
                 prefix = name.split("lora_B")[0]
                 if prefix not in module_params:
                     module_params[prefix] = {}
                 module_params[prefix]["lora_B"] = param
+
+        ella_variant = getattr(self.args, "ella_variant", "ella")
+        use_base_w = ella_variant == "ella_with_base_w"
+        _model = getattr(self.model, "module", self.model)
 
         lamda_1_list_raw = getattr(self.args, "lamda_1_list", None)
         prefix_to_segment = None
         lamda_1_by_segment = None
         if lamda_1_list_raw:
             try:
-                parts = [s.strip() for s in lamda_1_list_raw.split(",")]
-                if len(parts) == 3:
+                parts = [s.strip() for s in lamda_1_list_raw.split(",") if s.strip()]
+                if len(parts) >= 2:
                     lamda_1_by_segment = [float(x) for x in parts]
-                    prefix_to_segment, _ = self._get_prefix_block_segment_map(list(module_params.keys()))
+                    num_segments = len(lamda_1_by_segment)
+                    prefix_to_segment, _ = self._get_prefix_block_segment_map(
+                        list(module_params.keys()), num_segments=num_segments
+                    )
                     if prefix_to_segment is None:
                         lamda_1_by_segment = None
             except (ValueError, TypeError):
@@ -117,9 +132,17 @@ class UIETrainerELLAIncremental(UIETrainerELLA):
 
         for prefix, params in module_params.items():
             if all(k in params for k in ["lora_A", "lora_B", "loranew_A", "loranew_B"]):
-                W_past = torch.mm(params["lora_B"], params["lora_A"])
                 Delta_W_t = torch.mm(params["loranew_B"], params["loranew_A"])
-                module_ella = (Delta_W_t * W_past).pow(2).sum()
+                if use_base_w:
+                    try:
+                        module = _model.get_submodule(prefix.rstrip("."))
+                        W = module.weight.T if getattr(module, "fan_in_fan_out", False) else module.weight
+                        W_ref = W.to(Delta_W_t.dtype)
+                    except (AttributeError, ModuleNotFoundError):
+                        continue
+                else:
+                    W_ref = torch.mm(params["lora_B"], params["lora_A"])
+                module_ella = (Delta_W_t * W_ref).pow(2).sum()
                 if prefix_to_segment is not None and lamda_1_by_segment is not None and prefix in prefix_to_segment:
                     seg = prefix_to_segment[prefix]
                     ella_loss = ella_loss + lamda_1_by_segment[seg] * module_ella

@@ -1,0 +1,516 @@
+import torch
+from typing import Any, Dict, Union, List, Tuple, Optional
+from transformers import GenerationConfig
+from transformers.trainer_seq2seq import Seq2SeqTrainer
+from transformers.trainer import *
+from transformers.trainer_callback import TrainerCallback
+from transformers.trainer_pt_utils import nested_truncate, nested_concat, nested_numpify, find_batch_size, IterableDatasetShard
+from transformers.trainer_utils import has_length, EvalLoopOutput, denumpify_detensorize
+from transformers.integrations import is_deepspeed_zero3_enabled
+from transformers.integrations.deepspeed import deepspeed_init
+
+from uie_collator import SUPPORTED_DECODER_MODELS, check_model
+from uie_dataset_lora import ANSWER_PREFIX
+from uie_trainer_lora import log_cl_metrics_to_wandb
+
+
+def skip_instructions(model, predictions_ids, tokenizer, ignore_idx=-100):
+    predictions_ids = np.where(predictions_ids == ignore_idx, tokenizer.pad_token_id, predictions_ids)
+
+    predictions = tokenizer.batch_decode(
+        predictions_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
+    )
+
+    final_predictions = []
+    if check_model(model.config._name_or_path, SUPPORTED_DECODER_MODELS):
+        for pred in predictions:
+
+            if ANSWER_PREFIX in pred:
+                splits = pred.split(ANSWER_PREFIX)
+                final_predictions.append(splits[-1].strip())
+            else:
+                final_predictions.append('')
+    else:
+        final_predictions = predictions
+
+    return final_predictions
+
+
+class DenserEvalCallback(TrainerCallback):
+
+    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+
+        log_eval_steps = [1, 50, 100, 200]
+
+        # Log
+        if args.logging_strategy == IntervalStrategy.STEPS and state.global_step in log_eval_steps:
+            control.should_log = True
+
+        # Evaluate
+        if args.evaluation_strategy == IntervalStrategy.STEPS and state.global_step in log_eval_steps:
+            control.should_evaluate = True
+
+        # Save
+        # if args.save_strategy
+
+        return control
+
+
+class UIETrainerELLADrop(Seq2SeqTrainer):
+    """
+    ELLA: Efficient Lifelong Learning for Adapters (arXiv:2601.02232)
+    
+    Instead of strict orthogonality (O-LoRA), ELLA uses an alignment penalty:
+        L_ELLA = ||ΔW_t ⊙ W_past||_F²
+    
+    This penalizes overlap in high-energy (task-specific) directions while 
+    allowing reuse of low-energy directions for forward transfer.
+    """
+
+    def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]], num_items_in_batch: int = None) -> torch.Tensor:
+        """
+        Perform a training step on a batch of inputs.
+
+        Subclass and override to inject custom behavior.
+
+        Args:
+            model (`nn.Module`):
+                The model to train.
+            inputs (`Dict[str, Union[torch.Tensor, Any]]`):
+                The inputs and targets of the model.
+
+                The dictionary will be unpacked before being fed to the model. Most models expect the targets under the
+                argument `labels`. Check your model's documentation for all accepted arguments.
+            num_items_in_batch (`int`, *optional*):
+                Number of items in the batch.
+
+        Return:
+            `torch.Tensor`: The tensor with training loss on this batch.
+        """
+        model.train()
+        inputs = self._prepare_inputs(inputs)
+
+        if is_sagemaker_mp_enabled():
+            loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps)
+            return loss_mb.reduce_mean().detach().to(self.args.device)
+
+        with self.compute_loss_context_manager():
+            loss = self.compute_loss(model, inputs)
+
+        if self.args.n_gpu > 1:
+            loss = loss.mean()  # mean() to average on multi-gpu parallel training
+
+        if self.args.gradient_accumulation_steps > 1 and not self.deepspeed:
+            # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
+            loss = loss / self.args.gradient_accumulation_steps
+
+        ########################### ELLA Regularization ##########################
+        # ELLA: Efficient Lifelong Learning for Adapters (arXiv:2601.02232)
+        # Uses alignment penalty: L_ELLA = ||ΔW_t ⊙ W_ref||_F²
+        # Where:
+        #   - ΔW_t = loranew_B @ loranew_A (current task update)
+        #   - W_ref = W_past (lora_B @ lora_A) for "ella", or base model W for "ella_with_base_w"
+        #   - ⊙ = element-wise (Hadamard) product
+        # This penalizes overlap in high-energy directions while allowing
+        # reuse of low-energy directions for forward transfer.
+        
+        ella_variant = getattr(self.args, "ella_variant", "ella")
+        use_base_w = ella_variant == "ella_with_base_w"
+        
+        ella_loss = 0.
+        ella_loss_no_drop = 0.
+
+        # Collect LoRA parameters grouped by module prefix
+        module_params = {}
+        for name, param in self.model.named_parameters():
+            if "loranew_A" in name:
+                prefix = name.split("loranew_A")[0]
+                if prefix not in module_params:
+                    module_params[prefix] = {}
+                module_params[prefix]["loranew_A"] = param
+            elif "loranew_B" in name:
+                prefix = name.split("loranew_B")[0]
+                if prefix not in module_params:
+                    module_params[prefix] = {}
+                module_params[prefix]["loranew_B"] = param
+            elif "lora_A" in name and "loranew" not in name:
+                prefix = name.split("lora_A")[0]
+                if prefix not in module_params:
+                    module_params[prefix] = {}
+                module_params[prefix]["lora_A"] = param
+            elif "lora_B" in name and "loranew" not in name:
+                prefix = name.split("lora_B")[0]
+                if prefix not in module_params:
+                    module_params[prefix] = {}
+                module_params[prefix]["lora_B"] = param
+        
+        # Compute ELLA loss for each LoRA module
+        _model = getattr(self.model, "module", self.model)
+        for prefix, params in module_params.items():
+            if all(k in params for k in ["lora_A", "lora_B", "loranew_A", "loranew_B"]):
+                # ΔW_t = loranew_B @ loranew_A  [out_features × in_features]
+                # This represents the current task's LoRA update
+                Delta_W_t = torch.mm(params["loranew_B"], params["loranew_A"])
+                
+                if use_base_w:
+                    # ella_with_base_w: use base model weights W instead of W_past
+                    try:
+                        module = _model.get_submodule(prefix.rstrip("."))
+                        W = module.weight.T if getattr(module, "fan_in_fan_out", False) else module.weight
+                    except (AttributeError, ModuleNotFoundError):
+                        continue
+                    W_ref = W.to(Delta_W_t.dtype)
+                else:
+                    # Original ELLA: W_past = lora_B @ lora_A (accumulated past updates)
+                    W_ref = torch.mm(params["lora_B"], params["lora_A"])
+                
+                # ELLA loss: ||ΔW_t ⊙ W_ref||_F²; optionally drop lowest drop_frac of modes by energy e_i := ||u_i^T ΔW_t||
+                elem_sq = (Delta_W_t * W_ref).pow(2)
+                ella_loss_no_drop += elem_sq.sum()
+                drop_frac = getattr(self.args, "drop_lowest", 0.0)
+                if drop_frac > 0 and drop_frac < 1.0:
+                    # SVD of W_ref: W_ref = U Σ V^T. W_ref is fixed (frozen W_past), so cache U per module and reuse.
+                    try:
+                        if not hasattr(self, "_ella_svd_cache"):
+                            self._ella_svd_cache = {}
+                        if prefix not in self._ella_svd_cache:
+                            U, _, _ = torch.linalg.svd(W_ref, full_matrices=False)
+                            self._ella_svd_cache[prefix] = U.detach()
+                        U = self._ella_svd_cache[prefix]
+                        # e_i = ||u_i^T ΔW_t||; U.T @ Delta_W_t has shape [r, in_features]
+                        proj = U.T @ Delta_W_t
+                        e_i = torch.linalg.norm(proj, dim=1)
+                        r = e_i.numel()
+                        k_keep = max(1, r - int(round(r * drop_frac)))
+                        e_i_sorted, _ = torch.sort(e_i, descending=True)
+                        ella_loss += e_i_sorted[:k_keep].pow(2).sum()
+                    except Exception:
+                        ella_loss += elem_sq.sum()
+                else:
+                    ella_loss += elem_sq.sum()
+
+        # L2 regularization for loranew_A/B (optional, default lamda_2=0)
+        l2_loss = 0.
+        for name, param in self.model.named_parameters():
+            if "loranew_" in name:
+                l2_loss += torch.norm(param, p=2)
+
+        lamda_1 = self.args.lamda_1
+        lamda_2 = self.args.lamda_2
+
+        # Scalars for logging (same dict goes to console and wandb when report_to includes "wandb")
+        ella_loss_val = ella_loss.item() if isinstance(ella_loss, torch.Tensor) else float(ella_loss)
+        ella_no_drop_val = ella_loss_no_drop.item() if isinstance(ella_loss_no_drop, torch.Tensor) else float(ella_loss_no_drop)
+        l2_loss_val = l2_loss.item() if isinstance(l2_loss, torch.Tensor) else float(l2_loss)
+        if not hasattr(self, "_ella_l2_sum"):
+            self._ella_l2_sum = {"ella_loss": 0.0, "ella_loss_no_drop": 0.0, "ella_loss_after_drop": 0.0, "l2_loss": 0.0}
+            self._ella_l2_n = 0
+        self._ella_l2_sum["ella_loss"] += ella_loss_val
+        self._ella_l2_sum["ella_loss_no_drop"] += ella_no_drop_val
+        self._ella_l2_sum["ella_loss_after_drop"] += ella_loss_val
+        self._ella_l2_sum["l2_loss"] += l2_loss_val
+        self._ella_l2_n += 1
+
+        loss = loss + ella_loss * lamda_1 + l2_loss * lamda_2
+        ######################################################################
+
+        # Store loss before backward since accelerator.backward() returns None
+        loss_detached = loss.detach()
+        self.accelerator.backward(loss)
+
+        return loss_detached
+
+    def log(self, logs: dict, start_time: Optional[float] = None) -> None:
+        """Inject ella_loss and l2_loss (avg over last logging interval) so they appear in console and wandb."""
+        if getattr(self, "args", None) and getattr(self.args, "log_cl_metrics", True) and getattr(self, "_ella_l2_n", 0) > 0:
+            n = self._ella_l2_n
+            s = self._ella_l2_sum
+            ella_val = float(s["ella_loss"] / n)
+            l2_val = float(s["l2_loss"] / n)
+            logs["ella_loss"] = ella_val
+            logs["l2_loss"] = l2_val
+            # Full-precision string for small values (e.g. 1e-10) so they're not truncated as 0.0
+            logs["ella_loss_full"] = f"{ella_val:.15e}"
+            # ELLA drop: log no-drop (full sum) and after-drop (used in loss)
+            no_drop = s.get("ella_loss_no_drop", 0.0)
+            after_drop = s.get("ella_loss_after_drop", ella_val * n)
+            logs["ella_loss_no_drop"] = float(no_drop / n)
+            logs["ella_loss_after_drop"] = float(after_drop / n)
+            logs["ella_loss_no_drop_full"] = f"{float(no_drop / n):.15e}"
+            logs["ella_loss_after_drop_full"] = f"{float(after_drop / n):.15e}"
+            self._ella_l2_sum = {"ella_loss": 0.0, "ella_loss_no_drop": 0.0, "ella_loss_after_drop": 0.0, "l2_loss": 0.0}
+            self._ella_l2_n = 0
+        super().log(logs, start_time)
+        log_cl_metrics_to_wandb(self, logs)
+
+    def evaluation_loop(
+        self,
+        dataloader: DataLoader,
+        description: str,
+        prediction_loss_only: Optional[bool] = None,
+        ignore_keys: Optional[List[str]] = None,
+        metric_key_prefix: str = "eval",
+    ) -> EvalLoopOutput:
+        """
+        Prediction/evaluation loop, shared by `Trainer.evaluate()` and `Trainer.predict()`.
+
+        Works both with or without labels.
+        """
+        args = self.args
+
+        prediction_loss_only = prediction_loss_only if prediction_loss_only is not None else args.prediction_loss_only
+
+        # if eval is called w/o train init deepspeed here (only needed for ZeRO Stage 3)
+        if self.is_deepspeed_enabled and self.deepspeed is None and is_deepspeed_zero3_enabled():
+            _, _ = deepspeed_init(self, num_training_steps=0, inference=True)
+
+        model = self._wrap_model(self.model, training=False, dataloader=dataloader)
+
+        if len(self.accelerator._models) == 0 and model is self.model:
+            # For ZeRO Stage 3, use full DeepSpeed prepare; for Stage 2 or non-DeepSpeed, use eval mode
+            if self.is_deepspeed_enabled and is_deepspeed_zero3_enabled():
+                model = self.accelerator.prepare(model)
+            else:
+                model = self.accelerator.prepare_model(model, evaluation_mode=True)
+
+            if model is not self.model:
+                self.model_wrapped = model
+
+            if self.is_deepspeed_enabled and is_deepspeed_zero3_enabled():
+                self.deepspeed = self.model_wrapped
+
+        # if full fp16 or bf16 eval is wanted and this ``evaluation`` or ``predict`` isn't called
+        # while ``train`` is running, cast it to the right dtype first and then put on device
+        if not self.is_in_train:
+            if args.fp16_full_eval:
+                model = model.to(dtype=torch.float16, device=args.device)
+            elif args.bf16_full_eval:
+                model = model.to(dtype=torch.bfloat16, device=args.device)
+
+        batch_size = dataloader.batch_size
+
+        logger.info(f"***** Running {description} *****")
+        if has_length(dataloader.dataset):
+            logger.info(f"  Num examples = {self.num_examples(dataloader)}")
+        else:
+            logger.info("  Num examples: Unknown")
+        logger.info(f"  Batch size = {batch_size}")
+
+        model.eval()
+
+        self.callback_handler.eval_dataloader = dataloader
+        # Do this before wrapping.
+        eval_dataset = dataloader.dataset
+
+        if args.past_index >= 0:
+            self._past = None
+
+        # Initialize containers
+        # losses/preds/labels on GPU/TPU (accumulated for eval_accumulation_steps)
+        losses_host = None
+        preds_host = None
+        labels_host = None
+        # losses/preds/labels on CPU (final containers)
+        all_losses = None
+        all_preds = None
+        all_labels = None
+        # Will be useful when we have an iterable dataset so don't know its length.
+
+        observed_num_examples = 0
+        # Main evaluation loop
+        for step, inputs in enumerate(dataloader):
+            # Update the observed num examples
+            observed_batch_size = find_batch_size(inputs)
+            if observed_batch_size is not None:
+                observed_num_examples += observed_batch_size
+                # For batch samplers, batch_size is not known by the dataloader in advance.
+                if batch_size is None:
+                    batch_size = observed_batch_size
+
+            # Prediction step
+            loss, logits, labels = self.prediction_step(model, inputs, prediction_loss_only, ignore_keys=ignore_keys)
+
+            # Update containers on host
+            if loss is not None:
+                losses = self._nested_gather(loss.repeat(batch_size))
+                losses_host = losses if losses_host is None else torch.cat((losses_host, losses), dim=0)
+            if labels is not None:
+                labels = self.accelerator.pad_across_processes(labels, dim=1, pad_index=-100)
+                labels = self._nested_gather(labels)
+                labels_host = labels if labels_host is None else nested_concat(labels_host, labels, padding_index=-100)
+            if logits is not None:
+                logits = self.accelerator.pad_across_processes(logits, dim=1, pad_index=-100)
+                logits = self._nested_gather(logits)
+                if self.preprocess_logits_for_metrics is not None:
+                    logits = self.preprocess_logits_for_metrics(logits, labels)
+                preds_host = logits if preds_host is None else nested_concat(preds_host, logits, padding_index=-100)
+            self.control = self.callback_handler.on_prediction_step(args, self.state, self.control)
+
+            # Gather all tensors and put them back on the CPU if we have done enough accumulation steps.
+            if args.eval_accumulation_steps is not None and (step + 1) % args.eval_accumulation_steps == 0:
+                if losses_host is not None:
+                    losses = nested_numpify(losses_host)
+                    all_losses = losses if all_losses is None else np.concatenate((all_losses, losses), axis=0)
+                if preds_host is not None:
+                    logits = nested_numpify(preds_host)
+                    all_preds = logits if all_preds is None else nested_concat(all_preds, logits, padding_index=-100)
+                if labels_host is not None:
+                    labels = nested_numpify(labels_host)
+                    all_labels = (
+                        labels if all_labels is None else nested_concat(all_labels, labels, padding_index=-100)
+                    )
+
+                # Set back to None to begin a new accumulation
+                losses_host, preds_host, labels_host = None, None, None
+
+        if args.past_index and hasattr(self, "_past"):
+            # Clean the state at the end of the evaluation loop
+            delattr(self, "_past")
+
+        # Gather all remaining tensors and put them back on the CPU
+        if losses_host is not None:
+            losses = nested_numpify(losses_host)
+            all_losses = losses if all_losses is None else np.concatenate((all_losses, losses), axis=0)
+        if preds_host is not None:
+            logits = nested_numpify(preds_host)
+            all_preds = logits if all_preds is None else nested_concat(all_preds, logits, padding_index=-100)
+        if labels_host is not None:
+            labels = nested_numpify(labels_host)
+            all_labels = labels if all_labels is None else nested_concat(all_labels, labels, padding_index=-100)
+
+        # Number of samples
+        if has_length(eval_dataset):
+            num_samples = len(eval_dataset)
+        # The instance check is weird and does not actually check for the type, but whether the dataset has the right
+        # methods. Therefore we need to make sure it also has the attribute.
+        elif isinstance(eval_dataset, IterableDatasetShard) and hasattr(eval_dataset, "num_examples"):
+            num_samples = eval_dataset.num_examples
+        else:
+            num_samples = observed_num_examples
+
+        # Number of losses has been rounded to a multiple of batch_size and in a distributed training, the number of
+        # samplers has been rounded to a multiple of batch_size, so we truncate.
+        if all_losses is not None:
+            all_losses = all_losses[:num_samples]
+        if all_preds is not None:
+            all_preds = nested_truncate(all_preds, num_samples)
+        if all_labels is not None:
+            all_labels = nested_truncate(all_labels, num_samples)
+
+        # Metrics!
+        if self.compute_metrics is not None and all_preds is not None and all_labels is not None:
+            metrics = self.compute_metrics(dataset=eval_dataset, preds=all_preds, save_prefix=metric_key_prefix)
+        else:
+            metrics = {}
+
+        metrics["global_step"] = self.state.global_step
+
+        # To be JSON-serializable, we need to remove numpy types or zero-d tensors
+        metrics = denumpify_detensorize(metrics)
+
+        if all_losses is not None:
+            metrics[f"{metric_key_prefix}_loss"] = all_losses.mean().item()
+
+        # Prefix all keys with metric_key_prefix + '_'
+        for key in list(metrics.keys()):
+            if not key.startswith(f"{metric_key_prefix}_"):
+                metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
+
+        return EvalLoopOutput(predictions=all_preds, label_ids=all_labels, metrics=metrics, num_samples=num_samples)
+
+
+    def prediction_step(
+        self,
+        model: nn.Module,
+        inputs: Dict[str, Union[torch.Tensor, Any]],
+        prediction_loss_only: bool,
+        ignore_keys: Optional[List[str]] = None,
+    ) -> Tuple[Optional[float], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """
+        Perform an evaluation step on `model` using `inputs`.
+
+        Subclass and override to inject custom behavior.
+
+        Args:
+            model (`nn.Module`):
+                The model to evaluate.
+            inputs (`Dict[str, Union[torch.Tensor, Any]]`):
+                The inputs and targets of the model.
+
+                The dictionary will be unpacked before being fed to the model. Most models expect the targets under the
+                argument `labels`. Check your model's documentation for all accepted arguments.
+            prediction_loss_only (`bool`):
+                Whether or not to return the loss only.
+
+        Return:
+            Tuple[Optional[float], Optional[torch.Tensor], Optional[torch.Tensor]]: A tuple with the loss, logits and
+            labels (each being optional).
+        """
+
+        if not self.args.predict_with_generate or prediction_loss_only:
+            return super().prediction_step(
+                model, inputs, prediction_loss_only=prediction_loss_only, ignore_keys=ignore_keys
+            )
+
+        has_labels = "labels" in inputs
+        inputs = self._prepare_inputs(inputs)
+
+        # XXX: adapt synced_gpus for fairscale as well
+        gen_kwargs = self._gen_kwargs.copy()
+        synced_gpus = True if is_deepspeed_zero3_enabled() else False
+
+        attention_mask = inputs.get("attention_mask", None)
+
+        # Remove keys that should not go into GenerationConfig
+        gen_kwargs.pop("synced_gpus", None)
+        gen_kwargs.pop("attention_mask", None)
+
+        generation_config = GenerationConfig(**gen_kwargs)
+
+        # prepare generation inputs
+        # some encoder-decoder models can have varying encder's and thus
+        # varying model input names
+        if hasattr(self.model, "encoder") and self.model.encoder.main_input_name != self.model.main_input_name:
+            generation_inputs = inputs[self.model.encoder.main_input_name]
+        else:
+            generation_inputs = inputs[self.model.main_input_name]
+
+        generated_tokens = self.model.generate(
+            input_ids=generation_inputs, 
+            generation_config=generation_config,
+            attention_mask=attention_mask,
+            synced_gpus=synced_gpus,
+        )
+
+        bs, source_len = inputs['input_ids'].shape
+        # in case the batch is shorter than max length, the output should be padded
+        if check_model(self.model.config._name_or_path, SUPPORTED_DECODER_MODELS):
+            max_length = source_len + gen_kwargs["max_new_tokens"]
+        else:
+            max_length = gen_kwargs["max_new_tokens"]
+
+        if generated_tokens.shape[-1] < max_length:
+            generated_tokens = self._pad_tensors_to_max_len(generated_tokens, max_length)
+
+        with torch.no_grad():
+            if has_labels:
+                with self.autocast_smart_context_manager():
+                    outputs = model(**inputs)
+                if self.label_smoother is not None:
+                    loss = self.label_smoother(outputs, inputs["labels"]).mean().detach()
+                else:
+                    loss = (outputs["loss"] if isinstance(outputs, dict) else outputs[0]).mean().detach()
+            else:
+                loss = None
+
+        if self.args.prediction_loss_only:
+            return (loss, None, None)
+
+        if has_labels:
+            labels = inputs["labels"]
+            if labels.shape[-1] < gen_kwargs["max_new_tokens"]:
+                labels = self._pad_tensors_to_max_len(labels, gen_kwargs["max_new_tokens"])
+        else:
+            labels = None
+
+        return (loss, generated_tokens, labels)
